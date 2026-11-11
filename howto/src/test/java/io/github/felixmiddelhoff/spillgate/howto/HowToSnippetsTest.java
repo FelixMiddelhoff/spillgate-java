@@ -324,7 +324,7 @@ class HowToSnippetsTest {
         SpillgateException e = assertThrows(SpillgateException.class,
                 () -> decoder.decodeAll(new ByteArrayInputStream(bigWindow), "zstd"));
         assertEquals(Kind.MEMORY_LIMIT, e.kind());
-        assertEquals(503, e.kind().httpStatus());
+        assertEquals(413, e.kind().httpStatus());
     }
 
     @Test
