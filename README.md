@@ -87,7 +87,7 @@ Decoder decoder = Decoder.builder(Limits.maxOutput(8L << 20).withMaxInput(2L << 
 | `withMaxLayers(n)` | non-identity encodings in a chain, `1 .. 16` | 5 |
 | `withMaxRatio(n)` | output bytes per consumed input byte, `1 .. 2^31-1` | 1000 |
 | `withRatioGrace(n)` | output size below which the ratio is not checked | 64 KiB |
-| `withMaxInput(n)` | compressed bytes taken from the source (never more than `n + 1` are requested) | none |
+| `withMaxInput(n)` | compressed bytes taken from the source (never more than `n + 1` are requested; the byte after `n` may be looked at, only taking it is `INPUT_LIMIT`) | none |
 | `withoutRatioLimit()` | the one named opt-out of the ratio check | off |
 
 `Limits` is immutable and validated completely when the decoder is built (`INVALID_LIMITS`); the
@@ -147,7 +147,7 @@ The numbers and the tests that measure them are in [docs/memory.md](docs/memory.
 ## Status
 
 Version 0.1.0 is in preparation and not published yet; the API may still change before 1.0. The
-library passes all 353 vectors of the shared conformance corpus with brotli and zstd registered and
+library passes all 370 vectors of the shared conformance corpus with brotli and zstd registered and
 no vector skipped (`ConformanceTest`), every rule of the specification is named by a test
 (`SpecTraceTest`), and the core, zstd and brotli tests run under small heaps (see
 [docs/memory.md](docs/memory.md)). Design contract between the parts: [docs/design.md](docs/design.md);

@@ -179,6 +179,13 @@ final class LayerGuard extends InputStream {
                 // Never touch the message or toString() of a hostile throwable.
                 problem = new SpillgateException(Kind.INTERNAL, "codec threw " + t.getClass().getName(), layer, 0, t);
             }
+            // End of the codec step: a codec that took the maxInput+1-th byte violated SG-R-INP-01,
+            // whatever it returned in this step (data, the end, or corruption). The probe is
+            // only looked at until it is consumed (SG-R-INP-01).
+            SpillgateException taken = meter.checkTaken();
+            if (taken != null) {
+                throw fail(taken);
+            }
             if (problem == null) {
                 if (n < -1 || n > step) {
                     problem = new SpillgateException(Kind.INTERNAL,
@@ -268,9 +275,9 @@ final class LayerGuard extends InputStream {
 
     /** A codec that reads its input and copies it: the codec of an identity-only chain (SG-R-CDC-10). */
     static final class Passthrough implements CodecReader {
-        private final CodecInput input;
+        private final InputMeter input;
 
-        Passthrough(CodecInput input) {
+        Passthrough(InputMeter input) {
             this.input = input;
         }
 
@@ -284,6 +291,14 @@ final class LayerGuard extends InputStream {
                 return -1;
             }
             int n = Math.min(available, len);
+            int allowed = input.allowance();
+            if (allowed == 0) {
+                // Identity takes everything it passes: the byte after maxInput is taken and the
+                // guard ends the layer with input_limit after exactly maxInput bytes (SG-R-INP-01).
+                n = 1;
+            } else if (n > allowed) {
+                n = allowed;
+            }
             System.arraycopy(input.buffer(), input.position(), buf, off, n);
             input.consume(n);
             return n;

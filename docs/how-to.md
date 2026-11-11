@@ -102,7 +102,7 @@ Limits limits = Limits.maxOutput(8L << 20)  // required: bytes each layer may pr
 | `withMaxLayers(n)` | non-identity encodings in one chain (1..16) | 5 |
 | `withMaxRatio(n)` | output bytes per input byte the decoder consumed (1..2^31-1) | 1000 |
 | `withRatioGrace(n)` | output size below which the ratio is not checked | 64 KiB |
-| `withMaxInput(n)` | compressed bytes taken from the source (never more than `n + 1` are requested) | none |
+| `withMaxInput(n)` | compressed bytes taken from the source (never more than `n + 1` are requested; the byte after `n` may be looked at, only taking it is `INPUT_LIMIT`) | none |
 | `withoutRatioLimit()` | named opt-out of the ratio check; cannot be combined with `withMaxRatio` | off |
 
 `Limits` is immutable. It is validated completely when the decoder is built: a missing, zero or
@@ -150,6 +150,14 @@ If the compressed size is not already bounded by your web server, framework or b
 `withMaxInput`. spillgate bounds the output; it is not a substitute for limiting how many bytes you
 accept. Do both. `maxInput` counts the bytes taken from the source of layer 1 and also covers bodies
 without any encoding.
+
+What counts is taking, not looking: a decoder may look at the one byte after `maxInput` without
+taking it, so a complete stream of exactly `maxInput` bytes followed by trailing data is `CORRUPT`
+(trailing data), not `INPUT_LIMIT`. A stream that needs that byte to go on (it is cut at the limit and
+the source continues) is `INPUT_LIMIT`; if the source itself ends there it is a truncated stream
+(`CORRUPT`). Identity bodies take every byte they pass: one byte beyond `maxInput` is `INPUT_LIMIT`
+after exactly `maxInput` bytes were delivered. Only layer 1 has the limit, and at most `maxInput + 1`
+bytes are ever requested from the source.
 
 ## 3. Wire it in
 
@@ -536,7 +544,7 @@ careless codec cannot exceed `maxOutput`; a `RuntimeException` or `StackOverflow
 `Kind.INTERNAL`. Names must be lower-case tokens and must not reuse `identity`, `gzip`, `deflate` or
 `x-gzip` (`build()` throws `INVALID_OPTION`). A codec must not allocate from values read from the
 stream except its window within a cap; the contract is in the Javadoc of `CodecReader` and
-`CodecInput`. Read compressed input only through `CodecInput`, and `consume` only what you used.
+`CodecInput`. Read compressed input only through `CodecInput`, and `consume` only what you used. With a `maxInput`, the window may end in the byte after the limit (the probe), shown alone: consuming it is `INPUT_LIMIT` at the end of the step; to find trailing data after a complete stream, look at the byte (`fill()`) without consuming it, and if you buffered it ahead, give it back with `unreadProbe()`.
 
 ### What is not covered
 

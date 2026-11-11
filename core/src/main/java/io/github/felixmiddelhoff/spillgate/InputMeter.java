@@ -95,6 +95,12 @@ final class InputMeter implements CodecInput {
 
     /** Fetch the next chunk from the source into the (empty) buffer. */
     private void refill() throws SpillgateException {
+        if (!ended && fetchSize() == 0) {
+            // Everything allowed, the probe included, was fetched (SG-R-INP-02) and taken. The window
+            // stays as it is (the probe can still be given back) and is empty: the codec sees an end,
+            // and the guard turns the taken probe into input_limit at the end of the step.
+            return;
+        }
         pos = 0;
         filled = 0;
         if (ended) {
@@ -105,9 +111,6 @@ final class InputMeter implements CodecInput {
             throw new SpillgateException(Kind.INTERNAL, "the input was released", layer, 0, null);
         }
         int want = fetchSize();
-        if (want == 0) {
-            throw inputLimit();
-        }
         for (int empty = 0; ; ) {
             int n;
             try {
@@ -137,6 +140,30 @@ final class InputMeter implements CodecInput {
         }
     }
 
+    /**
+     * End-of-step check of the layer guard: a codec that has consumed the maxInput+1-th byte violated
+     * SG-R-INP-01, whatever it returned in that step. Null if all is well or if the meter already has
+     * a failure of its own (that one is reported).
+     */
+    SpillgateException checkTaken() {
+        if (maxInput > 0 && consumed > maxInput && failure == null) {
+            return fail(inputLimit());
+        }
+        return null;
+    }
+
+    /**
+     * For a pass-through layer (identity), which takes everything it passes: how many bytes it may
+     * still pass without taking the probe, 0 if only the probe is left, Integer.MAX_VALUE without a cap.
+     */
+    int allowance() {
+        if (maxInput == 0) {
+            return Integer.MAX_VALUE;
+        }
+        long left = maxInput - consumed;
+        return left <= 0 ? 0 : (int) Math.min(left, Integer.MAX_VALUE);
+    }
+
     @Override
     public int fill() throws IOException {
         if (failure != null) {
@@ -152,19 +179,30 @@ final class InputMeter implements CodecInput {
                 throw fail(e);
             }
         }
+        // The probe byte (number maxInput + 1) is shown, but never together with the bytes before it:
+        // a codec that takes a whole window is not charged for a byte it did not ask for. It comes
+        // alone, when the codec asks again. Showing it is looking, not taking: only what the codec
+        // consumes counts, and the layer guard checks that at the end of every codec step
+        // (SG-R-INP-01). The fetch size already keeps the total at maxInput + 1 (SG-R-INP-02).
         int end = filled;
         if (maxInput > 0 && pos < filled) {
             long allowance = maxInput - consumed;
-            if (allowance <= 0) {
-                // The probe byte exists: a MaxInput+1-th byte is being taken (SG-R-INP-01).
-                throw fail(inputLimit());
-            }
-            if (allowance < end - pos) {
+            if (allowance > 0 && allowance < end - pos) {
                 end = pos + (int) allowance;
             }
         }
         visible = end;
         return end - pos;
+    }
+
+    @Override
+    public boolean unreadProbe() {
+        if (maxInput <= 0 || consumed != maxInput + 1 || pos == 0) {
+            return false;
+        }
+        pos--;
+        consumed--;
+        return true;
     }
 
     @Override

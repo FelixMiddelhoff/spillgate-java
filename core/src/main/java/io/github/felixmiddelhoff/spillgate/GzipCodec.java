@@ -135,8 +135,15 @@ final class GzipCodec implements Codec {
 
         /** Parse a member header; false is the clean end of the input at a member boundary. */
         private boolean startMember() throws IOException {
-            if (!first && input.fill() == 0) {
-                return false;
+            if (!first) {
+                if (input.fill() == 0) {
+                    return false;
+                }
+                if ((input.buffer()[input.position()] & 0xff) != 0x1f) {
+                    // Not the start of another member: trailing data. The byte is only looked at,
+                    // not taken, so it never counts against maxInput (SG-R-INP-01).
+                    throw new SpillgateException(Kind.CORRUPT, "invalid gzip header");
+                }
             }
             headerCrc.reset();
             int id1 = needHeader("header");

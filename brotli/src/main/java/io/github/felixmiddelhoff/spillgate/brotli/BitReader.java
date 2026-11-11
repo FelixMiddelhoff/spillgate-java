@@ -29,6 +29,9 @@ final class BitReader {
 
   private CodecInput input;
   private boolean endOfStreamReached;
+  /** The last buffered byte is the probe, given back to the input until the stream reaches it. */
+  private boolean probeHeld;
+  private boolean probeTaken;
   /** Real bytes in byteBuffer. */
   private int validBytes;
   /** Number of valid ints in intBuffer. */
@@ -62,11 +65,7 @@ final class BitReader {
       while (validBytes < MIN_BYTES || (validBytes & 3) != 0) {
         int n = input.fill();
         if (n <= 0) {
-          endOfStreamReached = true;
-          tailBytes = validBytes;
-          java.util.Arrays.fill(byteBuffer, validBytes, byteBuffer.length, (byte) 0);
-          IntReader.convert(intReader, INT_BUFFER_SIZE);
-          intLimit = (tailBytes + 3) >> 2;
+          endOfInput();
           return;
         }
         int take = Math.min(n, WANT_BYTES - validBytes);
@@ -76,12 +75,48 @@ final class BitReader {
         System.arraycopy(input.buffer(), input.position(), byteBuffer, validBytes, take);
         input.consume(take);
         validBytes += take;
+        if (input.unreadProbe()) {
+          // The last byte is the one after the input limit. It is buffered as lookahead, but the
+          // stream has not used it yet: it does not count as taken until the position reaches it
+          // (settleProbe, SG-R-INP-01). Nothing can follow it (SG-R-INP-02): this is the end.
+          probeHeld = true;
+          endOfInput();
+          return;
+        }
       }
     } catch (IOException e) {
       throw new InputFailure(e);
     }
     intLimit = validBytes >> 2;
     IntReader.convert(intReader, intLimit);
+  }
+
+  /** The input is at its end: what is buffered is all there is, padded with zeros. */
+  private void endOfInput() {
+    endOfStreamReached = true;
+    tailBytes = validBytes;
+    java.util.Arrays.fill(byteBuffer, validBytes, byteBuffer.length, (byte) 0);
+    IntReader.convert(intReader, INT_BUFFER_SIZE);
+    intLimit = (tailBytes + 3) >> 2;
+  }
+
+  /**
+   * End of a decoder step: the probe byte (number maxInput + 1) that is buffered as lookahead counts as
+   * taken only if the stream has reached it (SG-R-INP-01). The trailing data of a complete stream, or a
+   * stream that failed before it, did not take it.
+   */
+  static void settleProbe(BitReader br) {
+    if (!br.probeHeld || br.probeTaken || unusedBytes(br) > 0) {
+      return;
+    }
+    try {
+      if (br.input.fill() > 0) {
+        br.input.consume(1);
+      }
+    } catch (IOException e) {
+      throw new InputFailure(e);
+    }
+    br.probeTaken = true;
   }
 
   /** The number of real bytes after the current position, or -1 if the position is past the end. */

@@ -23,4 +23,14 @@ public interface CodecInput {
 
     /** Mark {@code n} bytes of the window as used ({@code 0 <= n <=} the size {@code fill()} returned). */
     void consume(int n);
+
+    /**
+     * Give back the byte that was consumed last if it is the one after the input limit (the probe,
+     * number {@code maxInput + 1}): a codec that only looked at it, for instance because it buffered
+     * ahead, has not taken it (SG-R-INP-01). Returns whether the byte was given back; false, and
+     * nothing changes, for any other byte or without an input limit.
+     */
+    default boolean unreadProbe() {
+        return false;
+    }
 }

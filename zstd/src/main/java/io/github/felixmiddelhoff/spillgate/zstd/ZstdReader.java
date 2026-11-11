@@ -174,6 +174,14 @@ final class ZstdReader implements CodecReader {
             }
             throw Err.corrupt("an empty input is not a zstd stream");
         }
+        if (frames > 0) {
+            int first = in.buffer()[in.position()] & 0xff;
+            if (first != 0x28 && (first & 0xf0) != 0x50) {
+                // Cannot start another frame: trailing data. The byte is only looked at, not taken,
+                // so it never counts against maxInput (SG-R-INP-01).
+                throw Err.corrupt("data that is not a zstd frame follows the stream");
+            }
+        }
         readExact(small, 0, 4, "zstd magic number");
         long magic = le(4);
         if (magic == FRAME_MAGIC) {

@@ -63,6 +63,7 @@ final class BrotliReader implements CodecReader {
         try {
             Decode.decompress(s);
         } catch (RuntimeException e) {
+            BitReader.settleProbe(s.br);
             int produced = s.outputUsed;
             s.output = null;
             if (produced <= 0) {
@@ -74,6 +75,7 @@ final class BrotliReader implements CodecReader {
                     : new SpillgateException(Kind.CORRUPT, "brotli: invalid data", 0, 0, e);
             return produced;
         }
+        BitReader.settleProbe(s.br);
         return -1;
     }
 

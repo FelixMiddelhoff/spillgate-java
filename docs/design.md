@@ -98,7 +98,12 @@ public final class CancelToken { void cancel(); boolean isCanceled(); }   // SG-
 - `InputMeter implements CodecInput`: wraps the raw `InputStream` for layer 1 and a lower layer's
   guarded stream for the others; counts consumed bytes exactly; fetches at most 4 KiB at a time;
   enforces `maxInput` with the one probe byte (SG-R-INP-01/02), never requesting more than
-  `maxInput + 1` bytes in total; converts source failures; never reads the source again after a
+  `maxInput + 1` bytes in total. The probe (byte `maxInput + 1`) may be shown to the codec, always
+  alone and never together with earlier bytes; only what the codec consumes counts, and
+  `LayerGuard` checks `consumed > maxInput` at the end of every codec step (it overrides what the
+  step returned). Codecs peek for trailing data (gzip, deflate, zstd) or give the probe back
+  (`CodecInput.unreadProbe()`, brotli lookahead) so that trailing data is `CORRUPT`; identity
+  (`Passthrough`) takes what it passes; converts source failures; never reads the source again after a
   terminal condition (SG-R-LAY-09).
 - `LayerGuard`: per layer: output budget (SG-R-LAY-01..03, probe byte for the exact boundary, a bad
   trailer after exactly `maxOutput` bytes is `CORRUPT`), ratio once per codec step
@@ -145,7 +150,7 @@ validated up front to give `CORRUPT` rather than `ArrayIndexOutOfBoundsException
 `test-support` ports the Rust `crates/test-support` (generators from `spec/generators.md`, no
 compression library; every manifest hash must match). `conformance/src/test/...` ports the Rust
 `tests/conformance.rs` runner (`conformance/manifest.json` is read from the repo root; JSON via a
-test-scope dependency, e.g. Gson) and `spectrace`: all 353 vectors with no skips when zstd and
+test-scope dependency, e.g. Gson) and `spectrace`: all 370 vectors with no skips when zstd and
 brotli are on the classpath (they are, in the `conformance` module). Runner checks: base read
 pattern plus the five alternatives, sticky, `maxInput` bytes taken, `delivered_at_most`,
 `delivered_exactly`, layer, ratio prefix tolerance.
