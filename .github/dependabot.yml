@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: maven
+    directory: /
+    schedule: { interval: weekly }
+    # the exact pin of the brotli reference decoder (test scope) is reviewed by hand; see brotli/VENDORED.md
+    ignore:
+      - dependency-name: "org.brotli:dec"

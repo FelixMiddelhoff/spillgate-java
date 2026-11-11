@@ -1,0 +1,72 @@
+name: release
+
+# Publishes to Maven Central through the Central Portal. Runs only for a tag like v0.1.0 that the
+# maintainer pushes: checks that the tag equals the pom version, runs the whole suite, builds the jars,
+# checks them with a clean consumer project, and deploys from a protected environment ("maven-central",
+# required reviewer) that holds the portal token and the GPG key. See RELEASING.md for the one-time setup.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: the tag must equal the pom version
+        run: |
+          version=$(mvn -B -ntp -q -pl . help:evaluate -Dexpression=project.version -DforceStdout)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != version $version"; exit 1; }
+      - name: the whole suite (all codecs, no skipped vector, rule coverage, memory tests under small heaps)
+        run: mvn -B -ntp verify
+      - name: jars with sources and javadoc, into a clean local repository
+        run: mvn -B -ntp -DskipTests -Prelease -Dgpg.skip -Dmaven.repo.local="$RUNNER_TEMP/m2" install
+      - name: a clean consumer project runs against the built artifacts
+        run: bash .github/scripts/consumer-smoke.sh "$RUNNER_TEMP/m2" "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jars
+          path: |
+            core/target/*.jar
+            zstd/target/*.jar
+            brotli/target/*.jar
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # The environment "maven-central" is created in the repository settings and requires the
+    # maintainer's approval before this job runs; the secrets below exist only there.
+    environment:
+      name: maven-central
+      url: https://central.sonatype.com/publishing/deployments
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          server-id: central # the publishingServerId of the plugin
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE # the variable the maven-gpg-plugin reads
+      - name: sign, bundle and upload (tests ran in the build job)
+        run: mvn -B -ntp -DskipTests -Prelease deploy # autoPublish is false: the bundle stops at "validated" until you press Publish in the portal
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

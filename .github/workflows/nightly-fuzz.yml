@@ -1,0 +1,47 @@
+name: nightly-fuzz
+
+# The seeded mutation tests of the codecs (BrotliFuzzTest, ZstdDamageTest: damaged and mutated streams,
+# zstd also compared with zstd-jni) with a very large SPILLGATE_FUZZ_ROUNDS instead of the default 2000.
+# They assert: only SpillgateException (never INTERNAL), no more output than the limit, the same result
+# for every read size. The generators use fixed seeds, so more rounds extend the same sequence; they
+# are not coverage-guided. Jazzer (com.code-intelligence:jazzer-junit) resolves from Maven Central
+# (0.30.0 on 2026-11-11), but no Jazzer targets are in the repository yet.
+on:
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "rounds per fuzz test"
+        default: "3000000"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [zstd, brotli]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: fuzz ${{ matrix.module }}
+        run: mvn -B -ntp -pl ${{ matrix.module }} -am test -Dtest='BrotliFuzzTest,ZstdDamageTest' -Dsurefire.failIfNoSpecifiedTests=false
+        env:
+          SPILLGATE_FUZZ_ROUNDS: ${{ github.event.inputs.rounds || '3000000' }}
+      - name: keep the reports of a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-reports-${{ matrix.module }}
+          path: ${{ matrix.module }}/target/surefire-reports/
+          if-no-files-found: ignore

@@ -1,0 +1,113 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Branch protection names these jobs: "build-test (ubuntu-latest, 17)" and so on, plus the single
+  # jobs conformance, spectrace, javadoc, dependency-check and package.
+  build-test:
+    name: build-test (${{ matrix.os }}, ${{ matrix.jdk }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        jdk: ["17", "21"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.jdk }}
+          cache: maven
+      - name: every module's tests (unit, differential, memory under small heaps, conformance, how-to snippets)
+        run: mvn -B -ntp verify
+
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: the whole corpus with brotli and zstd registered; ConformanceTest fails if any vector is skipped
+        run: mvn -B -ntp -pl conformance -am test -Dtest=ConformanceTest -Dsurefire.failIfNoSpecifiedTests=false
+
+  spectrace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: every rule of the specification is named by a test or vector
+        run: mvn -B -ntp -pl conformance -am test -Dtest=SpecTraceTest -Dsurefire.failIfNoSpecifiedTests=false
+
+  javadoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - name: javadoc and sources jars without warnings (the release profile fails on any javadoc warning)
+        run: mvn -B -ntp -DskipTests -Prelease -Dgpg.skip package
+
+  # Chosen: GitHub dependency review on pull requests plus Dependabot (.github/dependabot.yml). The
+  # published artifacts have no runtime dependencies; the test-scope ones (JUnit, zstd-jni, org.brotli:dec,
+  # Gson) and the build plugins are what is reviewed. No OWASP dependency-check: it needs a vulnerability
+  # database download and adds noise for a project without runtime dependencies.
+  dependency-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: new vulnerable or disallowed dependencies in a pull request (needs the dependency graph enabled)
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+      - name: nothing to review on a push; the job stays green so that it can be a required check
+        if: github.event_name != 'pull_request'
+        run: echo "dependency review runs on pull requests; Dependabot watches main"
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: build the jars (sources and javadoc included) into a clean local repository
+        run: mvn -B -ntp -DskipTests -Prelease -Dgpg.skip -Dmaven.repo.local="$RUNNER_TEMP/m2" install
+      - name: the jars in the repository
+        run: find "$RUNNER_TEMP/m2/io/github/felixmiddelhoff" -name '*.jar' | sort
+      - name: a clean consumer project resolves the artifacts from that repository and runs against them
+        run: |
+          version=$(mvn -B -ntp -q -pl . -Dmaven.repo.local="$RUNNER_TEMP/m2" help:evaluate -Dexpression=project.version -DforceStdout)
+          bash .github/scripts/consumer-smoke.sh "$RUNNER_TEMP/m2" "$version"
