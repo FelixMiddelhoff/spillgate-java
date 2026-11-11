@@ -17,7 +17,7 @@ public enum Kind {
     /** More than {@code maxInput} compressed bytes were requested from the source. */
     INPUT_LIMIT("input_limit", 413),
     /** A codec would need more memory (window) than its cap allows. */
-    MEMORY_LIMIT("memory_limit", 503),
+    MEMORY_LIMIT("memory_limit", 413),
     /** A well-formed token that no registered codec handles. */
     UNSUPPORTED_ENCODING("unsupported_encoding", 415),
     /** The {@code Content-Encoding} header itself is malformed. */
@@ -46,8 +46,8 @@ public enum Kind {
 
     /**
      * The HTTP status a server should answer for this outcome when decoding a request body: 413 for
-     * output, ratio, input and layer limits, 415 for an unsupported encoding, 400 for a malformed
-     * header, corrupt data and a failed read, 503 for the memory limit and cancellation, 500 otherwise.
+     * output, ratio, input, layer and memory limits, 415 for an unsupported encoding, 400 for a malformed
+     * header, corrupt data and a failed read, 503 for cancellation, 500 otherwise.
      */
     public int httpStatus() {
         return httpStatus;

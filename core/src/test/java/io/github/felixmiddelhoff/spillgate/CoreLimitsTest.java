@@ -308,7 +308,7 @@ class CoreLimitsTest {
             {Kind.RATIO_LIMIT, "ratio_limit", 413},
             {Kind.LAYER_LIMIT, "layer_limit", 413},
             {Kind.INPUT_LIMIT, "input_limit", 413},
-            {Kind.MEMORY_LIMIT, "memory_limit", 503},
+            {Kind.MEMORY_LIMIT, "memory_limit", 413},
             {Kind.UNSUPPORTED_ENCODING, "unsupported_encoding", 415},
             {Kind.MALFORMED_ENCODING, "malformed_encoding", 400},
             {Kind.CORRUPT, "corrupt", 400},
