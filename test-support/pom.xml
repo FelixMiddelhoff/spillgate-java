@@ -10,7 +10,12 @@
   <artifactId>spillgate-test-support</artifactId>
   <name>spillgate-test-support (test only, not published)</name>
   <dependencies>
-
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.11.0</version>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
