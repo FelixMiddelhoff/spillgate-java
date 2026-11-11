@@ -266,7 +266,13 @@ class HowToSnippetsTest {
         assertEquals(415, post(CLIENT, uri, small, "compress")); // unknown encoding
         assertEquals(400, post(CLIENT, uri, java.util.Arrays.copyOf(small, small.length - 4), "gzip")); // truncated
         assertEquals(400, post(CLIENT, uri, small, "gzip;;")); // malformed header
-        assertEquals(413, post(CLIENT, uri, new byte[3 << 20], null)); // more than maxInput, even unencoded
+        // more than maxInput, even unencoded. The server answers while the client is still sending, so the
+        // client may see a reset connection instead of the 413: both are a refusal
+        try {
+            assertEquals(413, post(CLIENT, uri, new byte[3 << 20], null));
+        } catch (IOException resetWhileSending) {
+            // acceptable
+        }
     }
 
     @Test
