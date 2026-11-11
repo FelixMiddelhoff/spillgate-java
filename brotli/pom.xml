@@ -18,6 +18,7 @@
       <groupId>org.brotli</groupId>
       <artifactId>dec</artifactId>
       <version>0.1.2</version>
+      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
