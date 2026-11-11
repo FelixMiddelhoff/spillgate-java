@@ -408,7 +408,7 @@ class ConformanceTest {
             System.out.println("FAIL " + f);
         }
         assertTrue(failures.isEmpty(), failures.size() + " vectors failed, first: " + (failures.isEmpty() ? "" : failures.get(0)));
-        assertEquals(353, passed + skipped);
+        assertEquals(370, passed + skipped);
         assertEquals(0, skipped);
     }
 

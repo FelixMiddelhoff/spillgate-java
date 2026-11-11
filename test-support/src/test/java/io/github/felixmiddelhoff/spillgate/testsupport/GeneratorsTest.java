@@ -71,7 +71,7 @@ class GeneratorsTest {
             }
         }
         System.out.println("manifest inputs checked: " + checked + ", mismatches: " + bad);
-        assertEquals(353, checked);
+        assertEquals(370, checked);
         assertTrue(bad.isEmpty(), "mismatching inputs: " + bad);
     }
 }
