@@ -52,7 +52,7 @@ public final class SpillgateException extends IOException {
         if (layer > 0 || newLayer <= 0) {
             return this;
         }
-        return new SpillgateException(kind, getMessage(), newLayer, limit, getCause());
+        return new SpillgateException(kind, super.getMessage(), newLayer, limit, getCause());
     }
 
     /**
@@ -61,7 +61,7 @@ public final class SpillgateException extends IOException {
      * error does not pin the frames of the decoder.
      */
     public SpillgateException repeat() {
-        SpillgateException copy = new SpillgateException(kind, getMessage(), layer, limit, getCause());
+        SpillgateException copy = new SpillgateException(kind, super.getMessage(), layer, limit, getCause());
         copy.setStackTrace(new StackTraceElement[0]);
         return copy;
     }
