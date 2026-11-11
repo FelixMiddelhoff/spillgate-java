@@ -26,4 +26,34 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>default-testCompile</id>
+            <configuration>
+              <compilerArgs>
+                <arg>-Xlint:all</arg>
+                <arg>-Werror</arg>
+                <arg>--add-modules</arg>
+                <arg>jdk.management</arg>
+                <arg>--add-reads</arg>
+                <arg>io.github.felixmiddelhoff.spillgate.brotli=jdk.management,java.management</arg>
+              </compilerArgs>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Xmx256m --add-modules jdk.management --add-reads io.github.felixmiddelhoff.spillgate.brotli=jdk.management,java.management</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>
