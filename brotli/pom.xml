@@ -51,9 +51,27 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <argLine>-Xmx256m --add-modules jdk.management --add-reads io.github.felixmiddelhoff.spillgate.brotli=jdk.management,java.management</argLine>
-        </configuration>
+        <executions>
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <argLine>-Xmx256m --add-modules jdk.management --add-reads io.github.felixmiddelhoff.spillgate.brotli=jdk.management,java.management</argLine>
+              <excludedGroups>smallheap</excludedGroups>
+            </configuration>
+          </execution>
+          <!-- A 12 MiB heap cannot hold a 2^24 window: the allocation failure must become memory_limit. -->
+          <execution>
+            <id>smallheap</id>
+            <phase>test</phase>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <argLine>-Xmx12m</argLine>
+              <groups>smallheap</groups>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

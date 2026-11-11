@@ -70,6 +70,14 @@ public final class Decoder {
      * Decode {@code source} completely: the whole body, or an exception and no data (SG-R-API-02).
      * The buffer grows with the bytes produced, never from {@code maxOutput} (SG-R-MEM-02). A body
      * that cannot be held in one Java array fails with {@link Kind#OUTPUT_LIMIT}.
+     *
+     * <p>Memory: the peak is about <strong>three times the result size</strong>: the buffer doubles
+     * (old and new array are live together, 1.5x to 3x of the bytes produced at that moment) and the
+     * result is trimmed to its exact size with one more copy, unless the buffer happens to be exactly
+     * full. Budget three times {@code maxOutput} per concurrent call, or use
+     * {@link #reader(InputStream, String...)} and stream. If the heap cannot hold the buffer's growth
+     * (an {@link OutOfMemoryError} in that one allocation, and only there) the call fails with
+     * {@link Kind#MEMORY_LIMIT}; an {@code OutOfMemoryError} from anywhere else still propagates.
      */
     public byte[] decodeAll(InputStream source, String... contentEncoding) throws IOException {
         SpillgateInputStream stream = open(source, null, contentEncoding);
@@ -101,7 +109,16 @@ public final class Decoder {
             int needed = size + n;
             if (needed > out.length) {
                 long doubled = Math.max((long) out.length * 2, needed);
-                out = Arrays.copyOf(out, (int) Math.min(doubled, MAX_ARRAY));
+                int grown = (int) Math.min(doubled, MAX_ARRAY);
+                try {
+                    out = Arrays.copyOf(out, grown);
+                } catch (OutOfMemoryError e) {
+                    // Only this growth is converted: the heap cannot hold the body, which is a
+                    // limit of the process, not a corrupt stream. Other allocations propagate.
+                    out = null;
+                    throw new SpillgateException(Kind.MEMORY_LIMIT,
+                            "the decoded body does not fit in memory", 0, grown, null);
+                }
             }
             System.arraycopy(chunk, 0, out, size, n);
             size = needed;

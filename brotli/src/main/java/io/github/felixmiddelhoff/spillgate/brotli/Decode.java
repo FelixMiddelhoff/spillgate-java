@@ -6,6 +6,9 @@
 
 package io.github.felixmiddelhoff.spillgate.brotli;
 
+import io.github.felixmiddelhoff.spillgate.Kind;
+import io.github.felixmiddelhoff.spillgate.SpillgateException;
+
 import static io.github.felixmiddelhoff.spillgate.brotli.RunningState.BLOCK_START;
 import static io.github.felixmiddelhoff.spillgate.brotli.RunningState.CLOSED;
 import static io.github.felixmiddelhoff.spillgate.brotli.RunningState.COMPRESSED_BLOCK_START;
@@ -156,8 +159,7 @@ final class Decode {
     v[0] = value;
   }
 
-  private static void inverseMoveToFrontTransform(byte[] v, int vLen) {
-    int[] mtf = new int[256];
+  private static void inverseMoveToFrontTransform(byte[] v, int vLen, int[] mtf) {
     for (int i = 0; i < 256; i++) {
       mtf[i] = i;
     }
@@ -177,9 +179,9 @@ final class Decode {
     int repeat = 0;
     int repeatCodeLen = 0;
     int space = 32768;
-    int[] table = new int[32];
+    int[] table = br.scratch.codeLengthTable;
 
-    Huffman.buildHuffmanTable(table, 0, 5, codeLengthCodeLengths, CODE_LENGTH_CODES);
+    Huffman.buildHuffmanTable(table, 0, 5, codeLengthCodeLengths, CODE_LENGTH_CODES, br.scratch);
 
     while (symbol < numSymbols && space > 0) {
       BitReader.readMoreInput(br);
@@ -234,22 +236,29 @@ final class Decode {
     boolean ok = true;
     int simpleCodeOrSkip;
     BitReader.readMoreInput(br);
-    // TODO: Avoid allocation.
-    int[] codeLengths = new int[alphabetSize];
+    int[] codeLengths = br.scratch.codeLengths; // spillgate: zeroed, not allocated, per tree
     simpleCodeOrSkip = BitReader.readBits(br, 2);
     if (simpleCodeOrSkip == 1) { // Read symbols, codes & code lengths directly.
       int maxBitsCounter = alphabetSize - 1;
       int maxBits = 0;
-      int[] symbols = new int[4];
+      int[] symbols = br.scratch.symbols;
+      Utils.fillWithZeroes(symbols, 0, 4);
       int numSymbols = BitReader.readBits(br, 2) + 1;
       while (maxBitsCounter != 0) {
         maxBitsCounter >>= 1;
         maxBits++;
       }
-      // TODO: uncomment when codeLengths is reused.
-      // Utils.fillWithZeroes(codeLengths, 0, alphabetSize);
       for (int i = 0; i < numSymbols; i++) {
         symbols[i] = BitReader.readBits(br, maxBits) % alphabetSize;
+      }
+      if (numSymbols == 1) {
+        // spillgate: a one-symbol code fills the whole root table with that symbol (what the table
+        // builder does for it), without the length arrays: hostile headers declare hundreds of these.
+        java.util.Arrays.fill(table, offset, offset + (1 << HUFFMAN_TABLE_BITS), symbols[0]);
+        return;
+      }
+      Utils.fillWithZeroes(codeLengths, 0, alphabetSize);
+      for (int i = 0; i < numSymbols; i++) {
         codeLengths[symbols[i]] = 2;
       }
       codeLengths[symbols[0]] = 1;
@@ -276,7 +285,9 @@ final class Decode {
           break;
       }
     } else { // Decode Huffman-coded code lengths.
-      int[] codeLengthCodeLengths = new int[CODE_LENGTH_CODES];
+      Utils.fillWithZeroes(codeLengths, 0, alphabetSize);
+      int[] codeLengthCodeLengths = br.scratch.codeLengthCodeLengths;
+      Utils.fillWithZeroes(codeLengthCodeLengths, 0, CODE_LENGTH_CODES);
       int space = 32;
       int numCodes = 0;
       for (int i = simpleCodeOrSkip; i < CODE_LENGTH_CODES && space > 0; i++) {
@@ -298,7 +309,7 @@ final class Decode {
     if (!ok) {
       throw new BrotliRuntimeException("Can't readHuffmanCode"); // COV_NF_LINE
     }
-    Huffman.buildHuffmanTable(table, offset, HUFFMAN_TABLE_BITS, codeLengths, alphabetSize);
+    Huffman.buildHuffmanTable(table, offset, HUFFMAN_TABLE_BITS, codeLengths, alphabetSize, br.scratch);
   }
 
   private static int decodeContextMap(int contextMapSize, byte[] contextMap, BitReader br) {
@@ -315,7 +326,7 @@ final class Decode {
     if (useRleForZeros) {
       maxRunLengthPrefix = BitReader.readBits(br, 4) + 1;
     }
-    int[] table = new int[Huffman.HUFFMAN_MAX_TABLE_SIZE];
+    int[] table = br.scratch.contextMapTable;
     readHuffmanCode(numTrees + maxRunLengthPrefix, table, 0, br);
     for (int i = 0; i < contextMapSize; ) {
       BitReader.readMoreInput(br);
@@ -340,7 +351,7 @@ final class Decode {
       }
     }
     if (BitReader.readBits(br, 1) == 1) {
-      inverseMoveToFrontTransform(contextMap, contextMapSize);
+      inverseMoveToFrontTransform(contextMap, contextMapSize, br.scratch.mtf);
     }
     return numTrees;
   }
@@ -406,7 +417,17 @@ final class Decode {
       return;
     }
     int ringBufferSizeWithSlack = newSize + Dictionary.MAX_TRANSFORMED_WORD_LENGTH;
-    byte[] newBuffer = new byte[ringBufferSizeWithSlack];
+    byte[] newBuffer;
+    try {
+      newBuffer = new byte[ringBufferSizeWithSlack];
+    } catch (OutOfMemoryError e) {
+      // spillgate: the size is bounded by the window cap, so this is "not enough memory for the
+      // window", reported like the zstd window is. Only this allocation is converted.
+      state.ringBuffer = null;
+      state.ringBufferSize = 0;
+      throw new InputFailure(new SpillgateException(Kind.MEMORY_LIMIT,
+          "brotli: the window could not be allocated", 0, newSize, null));
+    }
     if (state.ringBuffer != null) {
       System.arraycopy(state.ringBuffer, 0, newBuffer, 0, state.ringBufferSize);
     } else {
@@ -443,12 +464,7 @@ final class Decode {
       return;
     }
     // TODO: Reset? Do we need this?
-    state.hGroup0.codes = null;
-    state.hGroup0.trees = null;
-    state.hGroup1.codes = null;
-    state.hGroup1.trees = null;
-    state.hGroup2.codes = null;
-    state.hGroup2.trees = null;
+    // spillgate: the tree groups are kept and reused (see HuffmanTreeGroup.init).
 
     BitReader.readMoreInput(br);
     decodeMetaBlockLength(br, state);

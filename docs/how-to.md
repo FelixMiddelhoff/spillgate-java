@@ -756,6 +756,21 @@ For each, replace the decoder with spillgate or make sure it never sees unbounde
   trouble and `INTERNAL` errors as noise.
 - **Treating `identity` as safe.** An unencoded body is bounded as well; that is deliberate.
 - **Relying on `Thread.interrupt()` to stop a decode.** Use a `CancelToken`.
+- **Racing `close()` with `read()`.** A stream is for one thread. The one supported cross-thread
+  use is a watchdog that calls `close()` while another thread reads: that reader gets bytes, a clean
+  end or a plain `IOException("stream closed")`, never a `NullPointerException` or an `INTERNAL`
+  error. Do not rely on anything else about concurrent use; to stop a read use a `CancelToken`.
+- **A source that throws an `Error`.** An `AssertionError` or `StackOverflowError` from your source
+  becomes `INTERNAL`; `VirtualMachineError`s such as `OutOfMemoryError` propagate (the JVM is not in a
+  state the library can vouch for) after the layer's state is released.
+- **Brotli's window is allocated up to the declared meta-block length, not lazily.** A stream that
+  declares a large first meta-block makes the decoder allocate its ring (up to the window cap, about
+  17 MiB at 2^24) and then stall on a slow source. Budget `layers x window` per concurrent stream and
+  lower `withMaxWindowBits`.
+- **Brotli output arrives in ring-sized pieces.** The decoder hands out bytes only when its ring is
+  full or the stream ends, so `maxOutput` and the ratio check are coarse for brotli: up to one ring
+  (the window) of CPU is spent past `maxOutput` before the limit can fire. What is delivered stays
+  within `maxRatio x consumed`. Cancellation is checked per codec call, so it also acts at that grain.
 - **JPMS.** The artifacts are named modules: `io.github.felixmiddelhoff.spillgate`, `...spillgate.zstd`,
   `...spillgate.brotli`. Add `requires io.github.felixmiddelhoff.spillgate;` (and `...zstd` or
   `...brotli` if you use them) to your `module-info.java`. Only the public package is exported

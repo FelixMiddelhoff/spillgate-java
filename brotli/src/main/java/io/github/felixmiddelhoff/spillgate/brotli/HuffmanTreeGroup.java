@@ -27,6 +27,11 @@ final class HuffmanTreeGroup {
   int[] trees;
 
   /**
+   * Number of trees in use; the arrays may be longer (spillgate: they are reused across meta-blocks).
+   */
+  private int n;
+
+  /**
    * Initializes the Huffman tree group.
    *
    * @param group POJO to be initialised
@@ -35,8 +40,16 @@ final class HuffmanTreeGroup {
    */
   static void init(HuffmanTreeGroup group, int alphabetSize, int n) {
     group.alphabetSize = alphabetSize;
-    group.codes = new int[n * Huffman.HUFFMAN_MAX_TABLE_SIZE];
-    group.trees = new int[n];
+    group.n = n;
+    // spillgate: grow only (n <= 256 per group, so at most 256 * 1080 ints), never shrink, no
+    // clearing: every table entry that is read is written by the tree decode first.
+    int needed = n * Huffman.HUFFMAN_MAX_TABLE_SIZE;
+    if (group.codes == null || group.codes.length < needed) {
+      group.codes = new int[needed];
+    }
+    if (group.trees == null || group.trees.length < n) {
+      group.trees = new int[n];
+    }
   }
 
   /**
@@ -47,7 +60,7 @@ final class HuffmanTreeGroup {
    */
   static void decode(HuffmanTreeGroup group, BitReader br) {
     int next = 0;
-    int n = group.trees.length;
+    int n = group.n;
     for (int i = 0; i < n; i++) {
       group.trees[i] = next;
       Decode.readHuffmanCode(group.alphabetSize, group.codes, next, br);

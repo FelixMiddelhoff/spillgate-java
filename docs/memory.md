@@ -32,6 +32,27 @@ allocates nothing. A stream that asks for more is refused as `MEMORY_LIMIT`. Bud
 streams: for example 64 open brotli streams at the default cap are about 1 GiB of heap. Lower
 `withMaxWindowBits` / `withMaxWindowBytes` on busy servers (the guide's example uses 22 bits and 4 MiB).
 
+## What a hostile brotli header costs
+
+A compressed meta-block can declare up to 256 literal trees, 256 distance trees and 256 command trees
+for a few hundred bytes, with `MLEN` 1. The upstream decoder allocated about 2.2 MB and built 512
+tables for each such meta-block. The vendored decoder now keeps the table arrays and the code length
+scratch for the whole stream (at most 3 x 256 x 1080 ints, about 3.3 MiB, allocated once and only
+grown) and fills single-symbol codes directly. Measured on the development machine (4000 hostile
+meta-blocks of 700 bytes, 2.86 MB of input, `BrotliHostileCpuTest`): **before 2.67 s (932 ns per input
+byte), after 0.09 s (33 ns per input byte)**. Memory stays flat at the figure in the table above. The
+ratio limit still cannot fire on such input (one output byte per meta-block, the work is in the
+headers), so bound it with **`maxInput`**: at about 33 ns per input byte a 1 MiB input is bounded to
+roughly 35 ms of header CPU per stream.
+
+Two more brotli properties to budget for: the ring is allocated from the declared meta-block length
+up to the window cap (about 17 MiB per stream at 2^24), whether or not the source ever delivers the
+data (budget layers x window), and the decoder delivers output only when the ring is full or the
+stream ends, so `maxOutput` and the ratio are checked coarsely (up to one ring of CPU past
+`maxOutput`; what is delivered stays within `maxRatio x consumed`). A window that the heap cannot hold
+is `MEMORY_LIMIT`, not an `OutOfMemoryError`; `decodeAll` converts an `OutOfMemoryError` in the growth
+of its own buffer the same way (its peak is about three times the result).
+
 ## What the tests measure
 
 - `core/.../CoreMemoryTest` (the module's surefire runs with **`-Xmx96m`**, and the test asserts that
@@ -49,6 +70,8 @@ streams: for example 64 open brotli streams at the default cap are about 1 GiB o
   hostile table-hog header (under 6 MiB in total, about 3.3 MiB live), that nothing is retained
   (under 4 MiB) across 20 failed decodes of a 1 GiB bomb and hostile headers, and that a refused
   window creates no decoder state. See also `brotli/VENDORED.md`.
+- `BrotliWindowOomTest` runs under **`-Xmx12m`** (a separate surefire execution, group `smallheap`):
+  a 2^24 window that cannot be allocated is `MEMORY_LIMIT`.
 - `howto/.../HowToSnippetsTest` decodes a 200 MB bomb under **`-Xmx64m`** through the public API.
 - The native memory of the `Inflater` is not visible to these heap measurements; it is released by
   `end()` (see `RawInflate`), and the bound above is derived, not measured.

@@ -24,6 +24,8 @@ final class BitReader {
   private final byte[] byteBuffer = new byte[BYTE_BUFFER_SIZE];
   private final int[] intBuffer = new int[INT_BUFFER_SIZE];
   private final IntReader intReader = new IntReader();
+  /** Temporary arrays of the Huffman code reader (spillgate: once per stream). */
+  final HuffmanScratch scratch = new HuffmanScratch();
 
   private CodecInput input;
   private boolean endOfStreamReached;

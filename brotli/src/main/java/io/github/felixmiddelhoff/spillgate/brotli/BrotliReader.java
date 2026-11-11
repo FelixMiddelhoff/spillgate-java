@@ -15,6 +15,8 @@ final class BrotliReader implements CodecReader {
     private boolean ended;
     private boolean pendingEnd;
     private IOException failure;
+    /** A failure that follows the bytes the failing call had already produced. */
+    private IOException deferred;
 
     BrotliReader(CodecInput input, int maxWindowBits) {
         this.input = input;
@@ -34,6 +36,9 @@ final class BrotliReader implements CodecReader {
         if (len == 0) {
             return 0;
         }
+        if (deferred != null) {
+            return fail(deferred);
+        }
         if (ended) {
             return -1;
         }
@@ -47,6 +52,29 @@ final class BrotliReader implements CodecReader {
             // the vendored decoder reports every invalid stream through unchecked exceptions
             return fail(new SpillgateException(Kind.CORRUPT, "brotli: invalid data", 0, 0, e));
         }
+    }
+
+    /**
+     * The decoder failed in this call after it had already copied bytes into the caller's buffer: they
+     * are delivered, the failure follows on the next call, so what is delivered before a failure does
+     * not depend on the read size (SG-R-RDR-01).
+     */
+    private int runDecoder(State s) throws IOException {
+        try {
+            Decode.decompress(s);
+        } catch (RuntimeException e) {
+            int produced = s.outputUsed;
+            s.output = null;
+            if (produced <= 0) {
+                throw e;
+            }
+            state = null;
+            deferred = e instanceof InputFailure f
+                    ? f.io()
+                    : new SpillgateException(Kind.CORRUPT, "brotli: invalid data", 0, 0, e);
+            return produced;
+        }
+        return -1;
     }
 
     private int fail(IOException e) throws IOException {
@@ -89,7 +117,10 @@ final class BrotliReader implements CodecReader {
         s.outputOffset = off;
         s.outputLength = Math.min(len, MAX_STEP);
         s.outputUsed = 0;
-        Decode.decompress(s);
+        int failed = runDecoder(s);
+        if (failed > 0) {
+            return failed;
+        }
         int n = s.outputUsed;
         s.output = null;
         if (s.runningState == RunningState.FINISHED) {

@@ -66,12 +66,13 @@ final class Huffman {
    * Builds Huffman lookup table assuming code lengths are in symbol order.
    */
   static void buildHuffmanTable(int[] rootTable, int tableOffset, int rootBits, int[] codeLengths,
-      int codeLengthsSize) {
+      int codeLengthsSize, HuffmanScratch scratch) {
     int key; // Reversed prefix code.
-    int[] sorted = new int[codeLengthsSize]; // Symbols sorted by code length.
-    // TODO: fill with zeroes?
-    int[] count = new int[MAX_LENGTH + 1]; // Number of codes of each length.
-    int[] offset = new int[MAX_LENGTH + 1]; // Offsets in sorted table for each length.
+    int[] sorted = scratch.sorted; // Symbols sorted by code length.
+    int[] count = scratch.count; // Number of codes of each length.
+    int[] offset = scratch.offset; // Offsets in sorted table for each length.
+    Utils.fillWithZeroes(count, 0, MAX_LENGTH + 1);
+    Utils.fillWithZeroes(offset, 0, MAX_LENGTH + 1);
     int symbol;
 
     // Build histogram of code lengths.
