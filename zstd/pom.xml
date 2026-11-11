@@ -9,6 +9,8 @@
   </parent>
   <artifactId>spillgate-zstd</artifactId>
   <name>spillgate-zstd</name>
+  <description>Own zstd decoder (RFC 8878, RFC 9659) for spillgate.</description>
+
   <dependencies>
     <dependency>
       <groupId>io.github.felixmiddelhoff</groupId>
@@ -19,5 +21,43 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Test scope only: the compressor that produces the streams and the differential oracle. -->
+    <dependency>
+      <groupId>com.github.luben</groupId>
+      <artifactId>zstd-jni</artifactId>
+      <version>1.5.6-6</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <executions>
+          <!-- Everything runs under a small heap: an eager window allocation from a hostile header would fail. -->
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <argLine>-Xmx64m</argLine>
+              <excludedGroups>bigheap</excludedGroups>
+            </configuration>
+          </execution>
+          <!-- The few tests that need a 64 MiB window get a bigger heap. -->
+          <execution>
+            <id>bigheap</id>
+            <phase>test</phase>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <argLine>-Xmx600m</argLine>
+              <groups>bigheap</groups>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
