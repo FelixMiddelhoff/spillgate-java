@@ -38,6 +38,7 @@
     <module>brotli</module>
     <module>test-support</module>
     <module>conformance</module>
+    <module>howto</module>
   </modules>
 
   <properties>
