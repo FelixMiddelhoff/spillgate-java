@@ -9,7 +9,7 @@
   <packaging>pom</packaging>
 
   <name>spillgate (parent)</name>
-  <description>Decode untrusted compressed data (gzip, deflate, brotli, zstd) with mandatory limits.</description>
+  <description>Parent of spillgate-java: decode untrusted compressed data (gzip, deflate, brotli, zstd) with mandatory limits.</description>
   <url>https://github.com/FelixMiddelhoff/spillgate-java</url>
 
   <licenses>
@@ -20,13 +20,16 @@
   </licenses>
   <developers>
     <developer>
+      <id>FelixMiddelhoff</id>
       <name>Felix Middelhoff</name>
       <url>https://github.com/FelixMiddelhoff</url>
     </developer>
   </developers>
-  <scm>
+  <scm child.scm.url.inherit.append.path="false" child.scm.connection.inherit.append.path="false" child.scm.developerConnection.inherit.append.path="false">
     <url>https://github.com/FelixMiddelhoff/spillgate-java</url>
     <connection>scm:git:https://github.com/FelixMiddelhoff/spillgate-java.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/FelixMiddelhoff/spillgate-java.git</developerConnection>
+    <tag>HEAD</tag>
   </scm>
 
   <modules>
@@ -42,6 +45,9 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.11.4</junit.version>
     <spillgate.version>${project.version}</spillgate.version>
+    <project.build.outputTimestamp>2026-11-11T00:00:00Z</project.build.outputTimestamp>
+    <autoPublish>false</autoPublish>
+    <skipPublishing>false</skipPublishing>
   </properties>
 
   <dependencyManagement>
@@ -104,4 +110,78 @@
       </plugins>
     </pluginManagement>
   </build>
+
+  <profiles>
+    <!--
+      Publishing to Maven Central (see RELEASING.md). Normal builds need no keys and do not use this profile:
+      sources and javadoc jars, GPG signatures and the upload to the Central Portal are added only here.
+      Check it without keys with: mvn -DskipTests -Prelease -Dgpg.skip package
+    -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.3.1</version>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals><goal>jar-no-fork</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.12.0</version>
+            <configuration>
+              <doclint>all,-missing</doclint>
+              <failOnWarnings>true</failOnWarnings>
+              <failOnError>true</failOnError>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals><goal>jar</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.8</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals><goal>sign</goal></goals>
+                <configuration>
+                  <!-- the key comes from the environment (GPG_PRIVATE_KEY, GPG_PASSPHRASE) in CI -->
+                  <bestPractices>true</bestPractices>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.12.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <!-- the upload is validated and then waits for the manual "Publish" in the portal unless -DautoPublish=true -->
+              <autoPublish>${autoPublish}</autoPublish>
+              <skipPublishing>${skipPublishing}</skipPublishing>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

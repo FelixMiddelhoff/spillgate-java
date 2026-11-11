@@ -9,6 +9,7 @@
   </parent>
   <artifactId>spillgate</artifactId>
   <name>spillgate</name>
+  <description>Decode untrusted compressed data (identity, gzip, deflate) under mandatory limits; the core of spillgate-java.</description>
   <dependencies>
 
     <dependency>

@@ -9,7 +9,7 @@
   </parent>
   <artifactId>spillgate-zstd</artifactId>
   <name>spillgate-zstd</name>
-  <description>Own zstd decoder (RFC 8878, RFC 9659) for spillgate.</description>
+  <description>Zstandard (RFC 8878, RFC 9659) codec for spillgate: an own decoder with a window cap, no dependencies.</description>
 
   <dependencies>
     <dependency>

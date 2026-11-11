@@ -9,6 +9,11 @@
   </parent>
   <artifactId>spillgate-conformance</artifactId>
   <name>spillgate-conformance (tests only, not published)</name>
+  <properties>
+    <!-- not published: neither deployed nor uploaded to the Central Portal -->
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <skipPublishing>true</skipPublishing>
+  </properties>
   <dependencies>
     <dependency>
       <groupId>io.github.felixmiddelhoff</groupId>

@@ -9,6 +9,7 @@
   </parent>
   <artifactId>spillgate-brotli</artifactId>
   <name>spillgate-brotli</name>
+  <description>Brotli (RFC 7932) codec for spillgate: a vendored pure Java decoder behind a window cap and the spillgate limiter.</description>
   <dependencies>
     <dependency>
       <groupId>io.github.felixmiddelhoff</groupId>
