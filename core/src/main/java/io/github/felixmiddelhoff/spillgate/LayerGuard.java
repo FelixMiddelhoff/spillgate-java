@@ -41,14 +41,14 @@ final class LayerGuard extends InputStream {
     private static final int END = 1;
     private static final int FAILED = 2;
 
-    private CodecReader codec;
+    private volatile CodecReader codec;
     private final InputMeter meter;
     private final int layer;
     private final EffectiveLimits limits;
     private long produced;
-    private int state = RUNNING;
-    private SpillgateException error;
-    private byte[] scratch;
+    private volatile int state = RUNNING;
+    private volatile SpillgateException error;
+    private volatile byte[] scratch;
     private final byte[] one = new byte[1];
 
     LayerGuard(CodecReader codec, InputMeter meter, int layer, EffectiveLimits limits) {
@@ -71,8 +71,8 @@ final class LayerGuard extends InputStream {
     private SpillgateException fail(SpillgateException e) {
         SpillgateException named = e.withLayer(layer);
         if (state == RUNNING) {
+            error = named; // the error first: nobody may see FAILED without it
             state = FAILED;
-            error = named;
         }
         release();
         return state == FAILED ? error : named;
@@ -123,15 +123,12 @@ final class LayerGuard extends InputStream {
         if (n < 0) {
             return -1;
         }
-        SpillgateException swallowed = meter.failure();
         System.arraycopy(scratch, 0, buf, off, n);
         produced += n;
-        if (swallowed != null) {
-            // The codec hid a failure of its input and went on: the bytes it produced are delivered,
-            // the failure follows on the next read.
-            fail(swallowed);
-            return n;
-        }
+        // A codec may have hidden a failure of its input and gone on to hold back output. Nothing is
+        // dropped here: the codec keeps delivering what it holds, it meets the failure again at its
+        // next fetch, and a clean end that hides one is refused in call(). The bytes delivered
+        // before a source failure thus do not depend on the read size (SG-R-RDR-01).
         // The bytes that broke the ratio were produced first, so they are still delivered; the
         // error follows on the next read (SG-R-LAY-07).
         if (limits.ratioExceeded(produced, meter.consumed())) {
@@ -234,8 +231,8 @@ final class LayerGuard extends InputStream {
 
     private void abort() {
         if (state == RUNNING) {
-            state = FAILED;
             error = new SpillgateException(Kind.INTERNAL, "aborted by a fatal JVM error", layer, 0, null);
+            state = FAILED;
         }
         release();
     }
@@ -263,8 +260,8 @@ final class LayerGuard extends InputStream {
     @Override
     public void close() {
         if (state == RUNNING) {
-            state = FAILED;
             error = new SpillgateException(Kind.INTERNAL, "the layer is closed", layer, 0, null);
+            state = FAILED;
         }
         release();
     }

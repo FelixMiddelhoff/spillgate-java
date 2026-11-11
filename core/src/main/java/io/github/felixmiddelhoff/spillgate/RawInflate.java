@@ -21,13 +21,16 @@ final class RawInflate {
     private static final byte[] NO_INPUT = new byte[0];
     private boolean done;
     private boolean released;
-    private SpillgateException pending;
+    private IOException pending;
+    /** A failure of the input (source, lower layer, limit) that waits until the inflater is drained. */
+    private IOException inputFailure;
 
     /** Prepare for a new stream (gzip: the next member). */
     void reset() {
         inflater.reset();
         done = false;
         pending = null;
+        inputFailure = null;
         prefixPos = 0;
         prefixLen = 0;
     }
@@ -52,7 +55,10 @@ final class RawInflate {
     int step(CodecInput input, byte[] buf, int off, int len) throws IOException {
         while (true) {
             if (pending != null) {
-                throw pending.repeat();
+                throw again(pending);
+            }
+            if (inputFailure != null) {
+                return drainThenFail(buf, off, len);
             }
             if (done) {
                 return -1;
@@ -67,12 +73,19 @@ final class RawInflate {
                 pos = prefixPos;
                 avail = prefixLen;
             } else {
-                avail = input.fill();
+                try {
+                    avail = input.fill();
+                } catch (IOException e) {
+                    // The input failed while the inflater may still hold a match copy or buffered
+                    // symbols: they are delivered first, the failure follows (SG-R-RDR-01).
+                    inputFailure = e;
+                    continue;
+                }
                 if (avail == 0) {
                     // The input is at its end, but the inflater may still hold decodable symbols or a
                     // pending match: drain them first, so that what a truncated or corrupt stream
                     // delivers does not depend on read sizes or chunking (SG-R-RDR-01).
-                        src = NO_INPUT;
+                    src = NO_INPUT;
                     pos = 0;
                     draining = true;
                 } else {
@@ -127,6 +140,44 @@ final class RawInflate {
                 throw new SpillgateException(Kind.INTERNAL, "inflater made no progress");
             }
         }
+    }
+
+    private static IOException again(IOException e) {
+        return e instanceof SpillgateException s ? s.repeat() : e;
+    }
+
+    /**
+     * The input failed: produce what the inflater still holds without any input, and throw the failure
+     * once it holds nothing more (or breaks on the data it has). Output bytes never depend on where the
+     * input failed relative to the read size.
+     */
+    private int drainThenFail(byte[] buf, int off, int len) throws IOException {
+        IOException failure = inputFailure;
+        long writtenBefore = inflater.getBytesWritten();
+        boolean broken = false;
+        try {
+            inflater.setInput(NO_INPUT, 0, 0);
+            inflater.inflate(buf, off, len);
+        } catch (DataFormatException | RuntimeException e) {
+            broken = true;
+        }
+        int written = (int) (inflater.getBytesWritten() - writtenBefore);
+        if (!broken && inflater.finished()) {
+            // The stream ended inside what was buffered: the failure belongs to whatever follows it.
+            inputFailure = null;
+            done = true;
+            return written > 0 ? written : -1;
+        }
+        if (!broken && written > 0) {
+            return written;
+        }
+        pending = failure;
+        inputFailure = null;
+        release();
+        if (written > 0) {
+            return written;
+        }
+        throw again(failure);
     }
 
     /** Free the native state. Idempotent. */

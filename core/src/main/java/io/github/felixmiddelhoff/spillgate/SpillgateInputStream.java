@@ -39,9 +39,9 @@ public final class SpillgateInputStream extends InputStream {
     private final CancelToken cancel;
     private final byte[] one = new byte[1];
     private long produced;
-    private int state = RUNNING;
-    private SpillgateException error;
-    private boolean closed;
+    private volatile int state = RUNNING;
+    private volatile SpillgateException error;
+    private volatile boolean closed;
 
     SpillgateInputStream(LayerGuard[] guards, InputMeter sourceMeter, EffectiveLimits limits, CancelToken cancel) {
         this.guards = guards;
@@ -67,6 +67,13 @@ public final class SpillgateInputStream extends InputStream {
             return readChecked(b, off, len);
         } catch (VirtualMachineError e) {
             abort();
+            throw e;
+        } catch (RuntimeException | SpillgateException e) {
+            if (closed) {
+                // close() from another thread released the codecs under this read: whatever it
+                // tripped over (a null codec, a released input) is only "stream closed".
+                throw new IOException("stream closed");
+            }
             throw e;
         }
     }
@@ -107,8 +114,8 @@ public final class SpillgateInputStream extends InputStream {
 
     private SpillgateException fail(SpillgateException e) {
         if (state != FAILED) {
+            error = e; // the error first: nobody may see FAILED without it
             state = FAILED;
-            error = e;
         }
         releaseAll();
         return error;
@@ -116,8 +123,8 @@ public final class SpillgateInputStream extends InputStream {
 
     private void abort() {
         if (state != FAILED) {
-            state = FAILED;
             error = new SpillgateException(Kind.INTERNAL, "aborted by a fatal JVM error");
+            state = FAILED;
         }
         releaseAll();
     }
