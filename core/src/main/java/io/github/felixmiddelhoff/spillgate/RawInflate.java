@@ -18,6 +18,7 @@ final class RawInflate {
     private final byte[] prefix = new byte[2];
     private int prefixPos;
     private int prefixLen;
+    private static final byte[] NO_INPUT = new byte[0];
     private boolean done;
     private boolean released;
     private SpillgateException pending;
@@ -60,6 +61,7 @@ final class RawInflate {
             int pos;
             int avail;
             boolean fromPrefix = prefixLen > 0;
+            boolean draining = false;
             if (fromPrefix) {
                 src = prefix;
                 pos = prefixPos;
@@ -67,10 +69,16 @@ final class RawInflate {
             } else {
                 avail = input.fill();
                 if (avail == 0) {
-                    throw new SpillgateException(Kind.CORRUPT, "truncated deflate data");
+                    // The input is at its end, but the inflater may still hold decodable symbols or a
+                    // pending match: drain them first, so that what a truncated or corrupt stream
+                    // delivers does not depend on read sizes or chunking (SG-R-RDR-01).
+                        src = NO_INPUT;
+                    pos = 0;
+                    draining = true;
+                } else {
+                    src = input.buffer();
+                    pos = input.position();
                 }
-                src = input.buffer();
-                pos = input.position();
             }
             // The inflater keeps the array: it stays valid until inflate returns.
             inflater.setInput(src, pos, avail);
@@ -86,11 +94,14 @@ final class RawInflate {
                 failure = "invalid deflate data (" + e.getMessage() + ")";
             }
             int used = (int) (inflater.getBytesRead() - readBefore);
+            if (draining && inflater.getBytesWritten() == writtenBefore && failure == null && !inflater.finished()) {
+                throw new SpillgateException(Kind.CORRUPT, "truncated deflate data");
+            }
             int written = (int) (inflater.getBytesWritten() - writtenBefore);
             if (fromPrefix) {
                 prefixPos += used;
                 prefixLen -= used;
-            } else {
+            } else if (!draining) {
                 input.consume(used);
             }
             if (failure != null) {
