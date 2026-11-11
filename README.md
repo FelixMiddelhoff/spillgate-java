@@ -3,8 +3,12 @@
 Decode untrusted compressed data under mandatory limits. A decompression bomb ends in a typed
 `SpillgateException` instead of exhausting memory. Java port of
 [spillgate](https://github.com/FelixMiddelhoff/spillgate): it implements the shared specification
-(`spec/SPEC.md`) and passes the shared conformance corpus. Java 17 or newer; the core has no
-dependencies.
+(`spec/SPEC.md`) and passes the shared conformance corpus. Java 17 or newer.
+
+**New here? Read the [how-to guide](docs/how-to.md)**: choosing limits, wiring spillgate into
+`java.net.http.HttpClient`, Apache HttpClient, OkHttp, Servlet, Spring and Netty, mapping results to
+HTTP statuses, and finding the places in your service that decompress today (`GZIPInputStream`,
+`InflaterInputStream` and friends have no bound).
 
 ```java
 import io.github.felixmiddelhoff.spillgate.*;
@@ -17,7 +21,7 @@ static final Decoder DECODER = buildDecoder();
 
 static Decoder buildDecoder() {
     try {
-        return Decoder.of(Limits.maxOutput(8L * 1024 * 1024));
+        return Decoder.of(Limits.maxOutput(8L << 20).withMaxInput(2L << 20));
     } catch (SpillgateException e) {
         throw new IllegalStateException(e);
     }
@@ -36,30 +40,42 @@ static void stream(InputStream body, String contentEncoding) throws IOException 
         while ((n = in.read(buf)) >= 0) {
             // use the bytes; discard everything if a later read fails
         }
-    } catch (SpillgateException e) {
-        if (e.kind() == Kind.OUTPUT_LIMIT) { /* answer 413 */ }
-        int status = e.kind().httpStatus();
+    } catch (SpillgateException e) {          // before IOException: it is one, but not an I/O failure
+        int status = e.kind().httpStatus();   // 413 for OUTPUT_LIMIT, 415 for UNSUPPORTED_ENCODING, ...
         throw e;
     }
 }
 ```
 
-`contentEncoding` is a varargs of header field values as received (`"gzip, br", "zstd"`).
+`contentEncoding` is a varargs of header field values as received (`"gzip, br", "zstd"`). The
+API is blocking (`InputStream`); in reactive or NIO code run it on a worker thread.
 
-## Modules
+## Modules and artifacts
 
-| Artifact | Adds | Dependency |
-| --- | --- | --- |
-| `spillgate` (this core) | `identity`, `gzip`, `deflate` (zlib and raw) | none (JDK `Inflater` behind own framing) |
-| `spillgate-brotli` | brotli, `BrotliCodec` | `org.brotli:dec` (pure Java, pinned exactly) |
-| `spillgate-zstd` | zstd, `ZstdCodec` (own decoder, no dictionaries) | none |
+Group `io.github.felixmiddelhoff`, version `0.1.0` (not released yet; see [CHANGELOG.md](CHANGELOG.md)):
 
-Extension codecs are registered explicitly on a decoder; there is no global registry:
+| Artifact | Java module | Adds | Dependency |
+| --- | --- | --- | --- |
+| `spillgate` | `io.github.felixmiddelhoff.spillgate` | `identity`, `gzip`, `deflate` (zlib and raw) | none (JDK `Inflater` behind own framing) |
+| `spillgate-zstd` | `io.github.felixmiddelhoff.spillgate.zstd` | zstd, `ZstdCodec` (own decoder, no dictionaries) | `spillgate` |
+| `spillgate-brotli` | `io.github.felixmiddelhoff.spillgate.brotli` | brotli, `BrotliCodec` (vendored copy of Google's pure Java decoder, see [brotli/VENDORED.md](brotli/VENDORED.md)) | `spillgate` |
+
+```xml
+<dependency>
+  <groupId>io.github.felixmiddelhoff</groupId>
+  <artifactId>spillgate</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+The repository also holds `spillgate-test-support`, `spillgate-conformance` and `spillgate-howto`
+(tests only, never published). Extension codecs are registered explicitly on a decoder; there is no
+global registry:
 
 ```java
-Decoder decoder = Decoder.builder(Limits.maxOutput(8L << 20).withMaxInput(1L << 20))
-        .strictZlib(false)
-        .codec("zstd", ZstdCodec.create(zstdOptions))
+Decoder decoder = Decoder.builder(Limits.maxOutput(8L << 20).withMaxInput(2L << 20))
+        .codec("br", BrotliCodec.create(BrotliOptions.defaults().withMaxWindowBits(22)))
+        .codec("zstd", ZstdCodec.create(ZstdOptions.defaults().withMaxWindowBytes(4L << 20)))
         .build();
 ```
 
@@ -96,47 +112,54 @@ decoder keeps its own copy. No numeric value disables a limit.
   the cause (an `InterruptedIOException` is not retried); a `SpillgateException` from a lower layer
   or from another decoder's stream passes through. A source returning 0 bytes 100 times in a row,
   more bytes than requested, or a negative count other than -1 is `INTERNAL`.
-- **Codec failures are contained.** A `RuntimeException`, `StackOverflowError`, `LinkageError`,
-  contract violation (too many bytes, writing outside the range it was given, no progress) from a
-  codec is `INTERNAL`. An `OutOfMemoryError` (or another `VirtualMachineError`) releases the layer and
-  propagates: the JVM is no longer in a state the library can vouch for. The cause of an `INTERNAL`
-  error is the codec's throwable; its message is never copied into ours.
-- **`close()`** is idempotent and releases every codec (native memory included); it does **not**
-  close your source. Reading after `close()` throws a plain `IOException("stream closed")`. A stream
-  also releases its codecs at its clean end and at every error. Nothing relies on `finalize` or a
-  `Cleaner`: close your streams. `available()` returns 0.
+- **Codec failures are contained.** A `RuntimeException`, `StackOverflowError`, `LinkageError` or a
+  contract violation from a codec is `INTERNAL`. An `OutOfMemoryError` (or another
+  `VirtualMachineError`) releases the layer and propagates: the JVM is no longer in a state the
+  library can vouch for.
+- **`close()`** is idempotent and releases every codec (native memory of the `Inflater` included); it
+  does **not** close your source. Reading after `close()` throws a plain `IOException("stream
+  closed")`. Nothing relies on `finalize` or a `Cleaner`: close your streams. `available()` returns 0.
 - **Cancellation.** `new CancelToken()` passed to `reader(source, token, ...)`; `token.cancel()` from
-  any thread. Checked on every `read` and every fetch from the source (at least once per 4 KiB of
-  compressed input); a canceled stream throws `SpillgateException(CANCELED)`, sticky, never
-  `InterruptedIOException`. It is not a hard CPU bound: one codec step of at most 64 KiB output still
-  runs to its end. `Thread.interrupt()` is not cancellation.
+  any thread. A canceled stream throws `SpillgateException(CANCELED)`, sticky, never
+  `InterruptedIOException`. `Thread.interrupt()` is not cancellation.
 - **Threads.** A `Decoder` is thread safe; share one. A stream is not safe for concurrent use.
 
 ## Memory
 
-Apart from codec windows within their caps, one stream holds at most 4 KiB (input buffer) plus a
-scratch array of up to 64 KiB per layer: about 1.1 MiB for a 16-layer chain, far below the 4 MiB per
-layer of SG-R-MEM-02. `decodeAll` grows its buffer with the bytes produced and never allocates from
-`maxOutput` (so `maxOutput = Long.MAX_VALUE` is fine); a body that cannot fit one Java array fails
-with `OUTPUT_LIMIT`. The core tests run with `-Xmx96m` and stream a 4 GiB bomb under a 100 MiB budget.
+Streaming holds a few hundred KiB at most (4 KiB input buffer plus up to 64 KiB scratch per layer);
+`decodeAll` grows with the bytes produced, never from `maxOutput`, and peaks at up to about three
+times the output while its buffer grows. Brotli and zstd add their window, bounded by the cap you set.
+The numbers and the tests that measure them are in [docs/memory.md](docs/memory.md).
 
 ## Security model
 
 - Every limit is checked before bytes are handed out; no allocation is sized from a value in the
   data (declared sizes, headers, stream lengths).
-- `Content-Encoding` is parsed strictly (ASCII only, 1024 bytes, 16 elements, token grammar), a chain
+- `Content-Encoding` is parsed strictly (ASCII only, 1024 bytes, 16 elements, token grammar); a chain
   cannot multiply a bomb because each layer has its own budget.
 - A codec never gets the caller's array: it writes into a private scratch buffer and the guard copies
   validated bytes out, so a codec that ignores its length cannot damage your memory.
 - The ratio is judged once per codec step (at most 64 KiB), counted against bytes the codec actually
   consumed, so read-ahead gives no credit.
+- Not covered: the size of the compressed request you accept, timeouts, CPU after decoding, archive
+  formats. See the how-to guide, section 3. Vulnerabilities: [SECURITY.md](SECURITY.md).
+
+## Status
+
+Version 0.1.0 is in preparation and not published yet; the API may still change before 1.0. The
+library passes all 353 vectors of the shared conformance corpus with brotli and zstd registered and
+no vector skipped (`ConformanceTest`), every rule of the specification is named by a test
+(`SpecTraceTest`), and the core, zstd and brotli tests run under small heaps (see
+[docs/memory.md](docs/memory.md)). Design contract between the parts: [docs/design.md](docs/design.md);
+normative rules: [spec/SPEC.md](spec/SPEC.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md);
+releasing: [RELEASING.md](RELEASING.md).
 
 ## Build
 
 ```
-export JAVA_HOME="C:\\Projekte\\jdk-17.0.12+7"; export PATH="/c/Projekte/jdk-17.0.12+7/bin:/d/Claude/tools/maven/apache-maven-3.9.9/bin:$PATH"
-mvn -q -pl core test
+mvn -q test                    # Java 17+, Maven 3.9
 ```
 
-The design contract between the parts is in `docs/design.md`, the normative rules in `spec/SPEC.md`.
-Licensed under the MIT license.
+## License
+
+[MIT](LICENSE). The vendored brotli decoder is MIT licensed as well ([brotli/LICENSE-brotli](brotli/LICENSE-brotli)).
