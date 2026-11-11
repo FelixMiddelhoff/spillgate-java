@@ -75,14 +75,14 @@ public final class SpillgateInputStream extends InputStream {
         if (state == FAILED) {
             throw error.repeat();
         }
+        if (state == END) {
+            return len == 0 ? 0 : -1; // a clean end is sticky, a later cancel does not change it
+        }
         if (cancel != null && cancel.isCanceled()) {
             throw fail(new SpillgateException(Kind.CANCELED, "the stream was canceled"));
         }
         if (len == 0) {
             return 0; // SG-R-RDR-02
-        }
-        if (state == END) {
-            return -1;
         }
         int n;
         try {
