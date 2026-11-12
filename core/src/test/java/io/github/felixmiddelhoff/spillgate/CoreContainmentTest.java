@@ -428,7 +428,7 @@ class CoreContainmentTest {
                 // make it look like a stored stream so deeper states are reached
                 byte[] framed = stored(rng.bytes((int) rng.below(300)), 1 + (int) rng.below(80));
                 if (round % 6 == 0 && framed.length > 0) {
-                    framed[(int) rng.below(framed.length)] ^= 1 << rng.below(8);
+                    framed[(int) rng.below(framed.length)] ^= (byte) (1 << rng.below(8));
                 }
                 input = framed;
             }
@@ -489,7 +489,7 @@ class CoreContainmentTest {
         for (int at = 0; at < good.length; at++) {
             for (int bit = 0; bit < 8; bit++) {
                 byte[] bad = good.clone();
-                bad[at] ^= 1 << bit;
+                bad[at] ^= (byte) (1 << bit);
                 Outcome o = run(d, bad, "stored", 64);
                 assertTrue(o.kind == null || o.kind == Kind.CORRUPT, "flip " + at + ":" + bit + " gave " + o.kind);
             }
