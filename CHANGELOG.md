@@ -2,7 +2,7 @@
 
 Versions below 1.0 may still change the API.
 
-## Unreleased (intended as 0.1.0)
+## 0.1.0 - 2026-11-13
 
 First version. The Java implementation of the spillgate specification (Java 17 or newer).
 

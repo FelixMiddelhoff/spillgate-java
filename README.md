@@ -52,7 +52,7 @@ API is blocking (`InputStream`); in reactive or NIO code run it on a worker thre
 
 ## Modules and artifacts
 
-Group `io.github.felixmiddelhoff`, version `0.1.0` (not released yet; see [CHANGELOG.md](CHANGELOG.md)):
+Group `io.github.felixmiddelhoff`, version `0.1.0` (see [CHANGELOG.md](CHANGELOG.md)):
 
 | Artifact | Java module | Adds | Dependency |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ The numbers and the tests that measure them are in [docs/memory.md](docs/memory.
 
 ## Status
 
-Version 0.1.0 is in preparation and not published yet; the API may still change before 1.0. The
+Versions below 1.0 may still change the API. The
 library passes all 370 vectors of the shared conformance corpus with brotli and zstd registered and
 no vector skipped (`ConformanceTest`), every rule of the specification is named by a test
 (`SpecTraceTest`), and the core, zstd and brotli tests run under small heaps (see
