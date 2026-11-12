@@ -103,7 +103,7 @@ class ZstdDamageTest {
             for (int position = 0; position < stream.length; position++) {
                 for (int bit = 0; bit < 8; bit++) {
                     byte[] damaged = stream.clone();
-                    damaged[position] ^= 1 << bit;
+                    damaged[position] ^= (byte) (1 << bit);
                     total++;
                     if (checkAgrees(damaged, "stream " + index + " " + position + ":" + bit)) {
                         accepted++;
@@ -131,7 +131,7 @@ class ZstdDamageTest {
         for (int position = 0; position < stream.length; position++) {
             for (int bit = 0; bit < 8; bit++) {
                 byte[] damaged = stream.clone();
-                damaged[position] ^= 1 << bit;
+                damaged[position] ^= (byte) (1 << bit);
                 total++;
                 checkAgrees(damaged, position + ":" + bit);
             }
