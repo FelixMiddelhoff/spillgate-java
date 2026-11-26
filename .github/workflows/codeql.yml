@@ -25,7 +25,7 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with: { languages: java-kotlin, build-mode: manual }
       - name: build the sources (tests are not needed for the analysis)
         run: mvn -B -ntp -DskipTests package
